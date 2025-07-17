@@ -1,4 +1,4 @@
-# main.py (الإصدار النهائي الجاهز للنشر على Render)
+# main.py (الإصدار الاحترافي مع الإعدادات وميزات UX المحسنة)
 
 import logging
 import requests
@@ -19,12 +19,9 @@ from telegram.ext import (
 )
 
 # --- الإعدادات الأساسية ---
-# قراءة التوكن من متغيرات البيئة لزيادة الأمان
-BOT_TOKEN = os.getenv("BOT_TOKEN") 
-
-# تحديد مسار ملف البيانات بذكاء (يعمل محليًا وعلى Render)
-DATA_DIR = os.getenv("RENDER_DISK_MOUNT_PATH", ".")
-USER_DATA_FILE = os.path.join(DATA_DIR, "user_database.json")
+import os
+BOT_TOKEN = os.environ.get("BOT_TOKEN") 
+USER_DATA_FILE = "user_database.json"
 
 BASE_URL = "http://app.hama-univ.edu.sy/StdMark/"
 RESULT_URL = f"{BASE_URL}Home/Result"
@@ -45,7 +42,7 @@ REG_AWAIT_COLLEGE, REG_AWAIT_ID = range(2)
 TEMP_AWAIT_COLLEGE, TEMP_AWAIT_ID, TEMP_AWAIT_YEAR = range(2, 5)
 MY_RESULTS_AWAIT_YEAR = 5
 PAGING_RESULTS = 6
-DELETE_CONFIRMATION = 7
+DELETE_CONFIRMATION = 7 # حالة جديدة لتأكيد الحذف
 
 RESULTS_PER_PAGE = 4
 
@@ -57,8 +54,6 @@ def load_user_data():
     except (json.JSONDecodeError, FileNotFoundError): return {}
 
 def save_user_data(data):
-    # التأكد من وجود المجلد قبل الحفظ (مهم لـ Render)
-    os.makedirs(os.path.dirname(USER_DATA_FILE), exist_ok=True)
     with open(USER_DATA_FILE, 'w', encoding='utf-8') as f: json.dump(data, f, ensure_ascii=False, indent=4)
 
 # --- دوال الواجهة والتنقل المحسنة ---
@@ -127,7 +122,9 @@ def fetch_full_student_data(college_id: str, university_id: str, token: str, yea
         error_div = soup.find("div", class_="validation-summary-errors")
         if error_div:
             return False, None, None, "الرقم غير صحيح أو غير موجود في هذه الكلية."
+
         student_info = {}
+        # استخلاص البيانات من البطاقة العلوية إن وجدت
         info_card = soup.find("div", class_="card-body")
         if info_card:
             spans = info_card.find_all("span", class_="head")
@@ -140,6 +137,7 @@ def fetch_full_student_data(college_id: str, university_id: str, token: str, yea
                         student_info['father_name'] = next_span.text.strip()
                     elif "الكلية" in span.text:
                         student_info['college_name'] = next_span.text.strip()
+
         result_panels = soup.find_all('div', class_='panel-info')
         all_marks = []
         if result_panels:
@@ -151,8 +149,11 @@ def fetch_full_student_data(college_id: str, university_id: str, token: str, yea
                     for row in tbody.find_all('tr'):
                         cols = [td.text.strip() for td in row.find_all('td')]
                         if len(cols) >= 5: all_marks.append({"subject": cols[0], "session": cols[1], "mark": cols[2], "status": cols[3], "date": cols[4], "semester": heading})
+        
+        # إذا لم يتم العثور على أي معلومات أو علامات، فالرقم غير صالح
         if not student_info and not all_marks:
              return False, None, None, "لم يتم العثور على أي بيانات لهذا الرقم الجامعي."
+
         all_marks.reverse()
         return True, student_info, all_marks, None
     except Exception as e:
@@ -169,6 +170,7 @@ async def display_page(update: Update, context: ContextTypes.DEFAULT_TYPE, messa
     start_index = page * RESULTS_PER_PAGE
     end_index = start_index + RESULTS_PER_PAGE
     page_marks = marks[start_index:end_index]
+    
     student_info = user_data.get('student_info', {})
     text = f"👤 <b>الاسم:</b> {student_info.get('name', 'غير متوفر')}\n"
     text += f"👨‍💼 <b>اسم الأب:</b> {student_info.get('father_name', 'غير متوفر')}\n"
@@ -176,6 +178,7 @@ async def display_page(update: Update, context: ContextTypes.DEFAULT_TYPE, messa
     text += f"🆔 <b>الرقم الجامعي:</b> {user_data.get('university_id', '')}\n"
     text += f"--------------------------------------\n"
     text += f"📄 <b>عرض النتائج {start_index + 1}-{min(end_index, total_marks)} من {total_marks}</b>\n"
+
     for mark in page_marks:
         status = mark.get('status', '')
         status_emoji = "✅" if "ناجح" in status else "⛔" if "راسب" in status else "⚪"
@@ -183,14 +186,17 @@ async def display_page(update: Update, context: ContextTypes.DEFAULT_TYPE, messa
         text += f"🔹 <i>{mark.get('semester', '')}</i>\n"
         text += f"📖 <b>المادة:</b> {mark.get('subject', '')}\n{status_emoji} <b>الحالة:</b> {status}\n"
         text += f"📝 <b>العلامة:</b> {mark.get('mark', '')}\n🔄 <b>الدورة:</b> {mark.get('session', '')} | 📅 <b>التاريخ:</b> {mark.get('date', '')}\n"
+    
     keyboard, row = [], []
     if page > 0: row.append(InlineKeyboardButton("⬅️ السابق", callback_data="prev_page"))
     if end_index < total_marks: row.append(InlineKeyboardButton("التالي ➡️", callback_data="next_page"))
     if row: keyboard.append(row)
+    
     back_callback = "back_to_my_results_year_select" if context.user_data.get('is_my_results') else "back_to_temp_year_select"
     keyboard.append([InlineKeyboardButton("⬅️ رجوع لاختيار السنة", callback_data=back_callback)])
     keyboard.append([InlineKeyboardButton("🛑 إنهاء الاستعراض", callback_data="exit_paging")])
     reply_markup = InlineKeyboardMarkup(keyboard)
+    
     target_message = message_to_edit or (query.message if query else None)
     if target_message: await target_message.edit_text(text=text, reply_markup=reply_markup, parse_mode=ParseMode.HTML)
     else: await update.message.reply_text(text=text, reply_markup=reply_markup, parse_mode=ParseMode.HTML)
@@ -277,8 +283,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def show_my_results(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_db = load_user_data()
     user_id = str(update.effective_user.id)
-    user_info_db = user_db.get(user_id)
-    if not user_info_db:
+    user_info = user_db.get(user_id)
+    if not user_info:
         await update.message.reply_text("لم أجد بيانات محفوظة لك. يمكنك إضافتها من الإعدادات.")
         return ConversationHandler.END
     processing_message = await update.message.reply_text("🔍 جارٍ جلب بياناتك...")
@@ -286,11 +292,11 @@ async def show_my_results(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not token:
         await processing_message.edit_text("فشل الاتصال بالخادم.")
         return ConversationHandler.END
-    is_valid, student_info, all_marks, error_msg = fetch_full_student_data(user_info_db['college_id'], user_info_db['university_id'], token)
+    is_valid, student_info, all_marks, error_msg = fetch_full_student_data(user_info['college_id'], user_info['university_id'], token)
     if not is_valid:
         await processing_message.edit_text(f"خطأ: الرقم المحفوظ لم يعد صالحاً. {error_msg}")
         return ConversationHandler.END
-    context.user_data.update({'student_info': student_info, 'university_id': user_info_db['university_id'], 'full_marks': all_marks, 'is_my_results': True})
+    context.user_data.update({'student_info': student_info, 'university_id': user_info['university_id'], 'full_marks': all_marks, 'is_my_results': True})
     reply_markup = extract_available_years_and_create_keyboard(all_marks)
     await processing_message.edit_text("✅ تم جلب البيانات. اختر السنة لعرض نتائجها:", reply_markup=reply_markup)
     return MY_RESULTS_AWAIT_YEAR
@@ -354,7 +360,6 @@ async def filter_and_display_year(update: Update, context: ContextTypes.DEFAULT_
 
 # --- مسار الإعدادات ---
 async def show_settings_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    message_sender = update.message or update.callback_query.message
     user_db = load_user_data()
     user_id = str(update.effective_user.id)
     keyboard = []
@@ -365,12 +370,111 @@ async def show_settings_menu(update: Update, context: ContextTypes.DEFAULT_TYPE)
         keyboard.append([InlineKeyboardButton("➕ إضافة رقم جامعي افتراضي", callback_data="change_default")])
     keyboard.append([InlineKeyboardButton("ℹ️ حول البوت", callback_data="about_bot")])
     keyboard.append([InlineKeyboardButton("✉️ للتواصل والملاحظات", url="https://t.me/Mhamad_Alabdullah")]) # استبدل بمعرفك
-    
-    # تحديد ما إذا كان يجب إرسال رسالة جديدة أو تعديل الحالية
-    if isinstance(update, Update) and update.callback_query:
-        await update.callback_query.edit_message_text("⚙️ الإعدادات", reply_markup=InlineKeyboardMarkup(keyboard))
+    keyboard.append([InlineKeyboardButton("⬅️ العودة للقائمة الرئيسية", callback_data="back_to_main")])
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await update.message.reply_text("⚙️ الإعدادات", reply_markup=reply_markup)
+
+async def settings_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    if query.data == "change_default":
+        await query.message.delete()
+        return await start_registration(update.callback_query, context, is_callback=True)
+    elif query.data == "about_bot":
+        await query.edit_message_text(
+            text="ℹ️ **حول البوت**\n\nهذا البوت مصمم لمساعدة طلاب جامعة حماة في الوصول إلى علاماتهم الدراسية بسهولة وسرعة.\n\n**الميزات:**\n- حفظ رقمك الجامعي للوصول السريع.\n- البحث عن نتائج أي طالب آخر.\n- عرض النتائج بشكل مرتب ومنظم.\n\nتم التطوير بواسطة: [Mhamad Alabdullah](https://t.me/Mhamad_Alabdullah)",
+            parse_mode=ParseMode.MARKDOWN,
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ رجوع للإعدادات", callback_data="back_to_settings")]])
+        )
+    elif query.data == "back_to_main":
+        await query.edit_message_text("👍 تم العودة للقائمة الرئيسية.")
+    elif query.data == "back_to_settings":
+        await show_settings_menu(query, context)
+
+async def delete_data_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    keyboard = [
+        [InlineKeyboardButton("✅ نعم، أنا متأكد", callback_data="confirm_delete")],
+        [InlineKeyboardButton("❌ لا، تراجع", callback_data="cancel_delete")]
+    ]
+    await query.edit_message_text("⚠️ **تأكيد الحذف**\n\nهل أنت متأكد من رغبتك في حذف بياناتك المحفوظة (الكلية والرقم الجامعي)؟\nهذا الإجراء لا يمكن التراجع عنه.", 
+        reply_markup=InlineKeyboardMarkup(keyboard), parse_mode=ParseMode.MARKDOWN)
+    return DELETE_CONFIRMATION
+
+async def perform_delete(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    user_db = load_user_data()
+    user_id = str(update.effective_user.id)
+    if user_id in user_db:
+        del user_db[user_id]
+        save_user_data(user_db)
+        await query.edit_message_text("🗑️ تم حذف بياناتك بنجاح.")
     else:
-        await message_sender.reply_text("⚙️ الإعدادات", reply_markup=InlineKeyboardMarkup(keyboard))
+        await query.edit_message_text("لم يتم العثور على بيانات محفوظة لحذفها.")
+    return ConversationHandler.END
 
+async def cancel_delete(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    await query.edit_message_text("👍 تم إلغاء عملية الحذف.")
+    return ConversationHandler.END
 
-async def settings_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
+# --- تجميع كل شيء في الدالة الرئيسية ---
+def main() -> None:
+    if "YOUR_BOT_TOKEN_HERE" in BOT_TOKEN:
+        print("خطأ: لم يتم تعيين توكن البوت.")
+        return
+    application = Application.builder().token(BOT_TOKEN).build()
+    
+    # معالجات التنقل
+    async def back_to_reg_college(u, c): return await start_registration(u, c, is_callback=True)
+    async def back_to_temp_college(u, c): return await start_temp_search(u, c, is_callback=True)
+    async def back_to_temp_id(u, c): return await temp_college_selected(u, c)
+    async def back_to_year_select(u, c):
+        is_my_results = c.user_data.get('is_my_results')
+        back_cb = "back_to_main" if is_my_results else "back_to_temp_id"
+        reply_markup = extract_available_years_and_create_keyboard(c.user_data['full_marks'], back_callback=back_cb)
+        await u.callback_query.edit_message_text("اختر سنة أخرى لعرض نتائجها:", reply_markup=reply_markup)
+        return TEMP_AWAIT_YEAR if not is_my_results else MY_RESULTS_AWAIT_YEAR
+
+    # تعريف المحادثات
+    conv_handlers = {
+        "start": ConversationHandler(entry_points=[CommandHandler("start", start)], states={
+            REG_AWAIT_COLLEGE: [CallbackQueryHandler(reg_college_selected, pattern="^((?!cancel_op).)*$")],
+            REG_AWAIT_ID: [MessageHandler(filters.TEXT & ~filters.COMMAND, reg_receive_id), CallbackQueryHandler(back_to_reg_college, pattern="^back_to_reg_college$")],
+        }, fallbacks=[CallbackQueryHandler(cancel_inline_operation, pattern="^cancel_op$")]),
+        
+        "registration": ConversationHandler(entry_points=[CallbackQueryHandler(lambda u,c: start_registration(u,c,is_callback=True), pattern="^change_default$")], states={
+            REG_AWAIT_COLLEGE: [CallbackQueryHandler(reg_college_selected, pattern="^((?!cancel_op).)*$")],
+            REG_AWAIT_ID: [MessageHandler(filters.TEXT & ~filters.COMMAND, reg_receive_id), CallbackQueryHandler(back_to_reg_college, pattern="^back_to_reg_college$")],
+        }, fallbacks=[CallbackQueryHandler(cancel_inline_operation, pattern="^cancel_op$")]),
+
+        "temp_search": ConversationHandler(entry_points=[MessageHandler(filters.Regex("^إظهار نتائج أخرى 🔍$"), start_temp_search)], states={
+            TEMP_AWAIT_COLLEGE: [CallbackQueryHandler(temp_college_selected, pattern="^((?!cancel_op).)*$")],
+            TEMP_AWAIT_ID: [MessageHandler(filters.TEXT & ~filters.COMMAND, temp_id_received), CallbackQueryHandler(back_to_temp_college, pattern="^back_to_temp_college$")],
+            TEMP_AWAIT_YEAR: [CallbackQueryHandler(filter_and_display_year, pattern="^((?!back_to_temp_id|cancel_op).)*$"), CallbackQueryHandler(back_to_temp_id, pattern="^back_to_temp_id$")],
+            PAGING_RESULTS: [CallbackQueryHandler(page_flipper, pattern="^(prev_page|next_page|exit_paging)$"), CallbackQueryHandler(back_to_year_select, pattern="^back_to_temp_year_select$")],
+        }, fallbacks=[CallbackQueryHandler(cancel_inline_operation, pattern="^cancel_op$")], conversation_timeout=600),
+        
+        "my_results": ConversationHandler(entry_points=[MessageHandler(filters.Regex("^إظهار نتائجي 📄$"), show_my_results)], states={
+            MY_RESULTS_AWAIT_YEAR: [CallbackQueryHandler(filter_and_display_year, pattern="^((?!cancel_op).)*$")],
+            PAGING_RESULTS: [CallbackQueryHandler(page_flipper, pattern="^(prev_page|next_page|exit_paging)$"), CallbackQueryHandler(back_to_year_select, pattern="^back_to_my_results_year_select$")]
+        }, fallbacks=[CallbackQueryHandler(cancel_inline_operation, pattern="^cancel_op$")]),
+        
+        "delete_data": ConversationHandler(entry_points=[CallbackQueryHandler(delete_data_prompt, pattern="^delete_data_prompt$")], states={
+            DELETE_CONFIRMATION: [CallbackQueryHandler(perform_delete, pattern="^confirm_delete$"), CallbackQueryHandler(cancel_delete, pattern="^cancel_delete$")]
+        }, fallbacks=[])
+    }
+
+    application.add_handler(MessageHandler(filters.Regex("^الإعدادات ⚙️$"), show_settings_menu))
+    application.add_handler(CallbackQueryHandler(settings_menu_handler, pattern="^(about_bot|back_to_main|back_to_settings)$"))
+    for handler in conv_handlers.values():
+        application.add_handler(handler)
+    
+    print("البوت قيد التشغيل... اضغط CTRL+C للإيقاف.")
+    application.run_polling()
+
+if __name__ == "__main__":
+    main()
