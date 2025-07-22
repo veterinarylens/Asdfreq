@@ -1,0 +1,15 @@
+{
+  "request_verification_token": "input[name=__RequestVerificationToken]",
+  "college_select_dropdown": "select[name=CollegeId]",
+  "college_option": "option",
+  "validation_error_summary": "div.validation-summary-errors",
+  "student_info_card": "div.card-body",
+  "info_key_span": "span.head",
+  "info_value_span": "span.bottom",
+  "result_panels": "div.panel-info",
+  "panel_heading": "div.panel-heading",
+  "results_table": "table.table",
+  "table_body": "tbody",
+  "table_row": "tr",
+  "table_cell": "td"
+}
